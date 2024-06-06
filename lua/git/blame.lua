@@ -22,22 +22,22 @@ local function create_blame_win()
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_get_current_buf()
 
-  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(buf, "swapfile", false)
-  vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(buf, "filetype", "git.nvim")
-  vim.api.nvim_buf_set_option(buf, "buflisted", false)
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "git.nvim", { buf = buf })
+  vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
   if config.winbar then
     vim.api.nvim_set_option_value("winbar", "Git Blame", { scope = "local", win = win })
   end
 
-  vim.api.nvim_win_set_option(win, "number", false)
-  vim.api.nvim_win_set_option(win, "foldcolumn", "0")
-  vim.api.nvim_win_set_option(win, "foldenable", false)
-  vim.api.nvim_win_set_option(win, "foldenable", false)
-  vim.api.nvim_win_set_option(win, "winfixwidth", true)
-  vim.api.nvim_win_set_option(win, "signcolumn", "no")
-  vim.api.nvim_win_set_option(win, "wrap", false)
+  vim.api.nvim_set_option_value("number", false, { win = win })
+  vim.api.nvim_set_option_value("foldcolumn", "0", { win = win })
+  vim.api.nvim_set_option_value("foldenable", false, { win = win })
+  vim.api.nvim_set_option_value("foldenable", false, { win = win })
+  vim.api.nvim_set_option_value("winfixwidth", true, { win = win })
+  vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
+  vim.api.nvim_set_option_value("wrap", false, { win = win })
 
   return win, buf
 end
@@ -89,7 +89,8 @@ local function on_blame_done(lines)
   -- Disable wrap
   vim.api.nvim_win_set_option(starting_win, "wrap", false)
 
-  local blame_win, blame_buf = create_blame_win()
+  local current_top = vim.fn.line "w0" + vim.api.nvim_get_option_value("scrolloff", { win = ctx.starting_win })
+  local current_pos = vim.fn.line "."
 
   vim.api.nvim_buf_set_lines(blame_buf, 0, -1, true, lines)
   vim.api.nvim_buf_set_option(blame_buf, "modifiable", false)
@@ -100,11 +101,13 @@ local function on_blame_done(lines)
   vim.cmd("execute " .. tostring(current_pos))
 
   -- We should call cursorbind, scrollbind here to avoid unexpected behavior
-  vim.api.nvim_win_set_option(blame_win, "cursorbind", true)
-  vim.api.nvim_win_set_option(blame_win, "scrollbind", true)
+  vim.api.nvim_set_option_value("cursorbind", true, { win = ctx.blame_win })
+  vim.api.nvim_set_option_value("scrollbind", true, { win = ctx.blame_win })
 
-  vim.api.nvim_win_set_option(starting_win, "scrollbind", true)
-  vim.api.nvim_win_set_option(starting_win, "cursorbind", true)
+  vim.api.nvim_set_option_value("scrollbind", true, { win = ctx.starting_win })
+  vim.api.nvim_set_option_value("cursorbind", true, { win = ctx.starting_win })
+  -- Disable wrap
+  vim.api.nvim_set_option_value("wrap", false, { win = ctx.starting_win })
 
   -- Keymaps
   local options = {
