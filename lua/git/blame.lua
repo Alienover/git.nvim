@@ -4,17 +4,20 @@ local git = require "git.utils.git"
 
 local M = {}
 
-local blame_state = {
-  temp_file = "",
-  starting_win = "",
-  file_name = "",
-  relative_path = "",
-  wrap = false,
-  git_root = "",
-}
-
-local function blameLinechars()
+local function blame_line_chars()
   return vim.fn.strlen(vim.fn.getline ".")
+end
+
+--- @param current_win integer
+--- @param next_win integer
+local function on_quit(current_win, next_win)
+  if current_win ~= nil and vim.api.nvim_win_is_valid(current_win) then
+    vim.api.nvim_win_close(current_win, true)
+  end
+
+  if next_win ~= nil and vim.api.nvim_win_is_valid(next_win) then
+    vim.api.nvim_set_current_win(next_win)
+  end
 end
 
 local function create_blame_win()
@@ -40,6 +43,148 @@ local function create_blame_win()
   vim.api.nvim_set_option_value("wrap", false, { win = win })
 
   return win, buf
+end
+
+local Context = {}
+
+function Context:new()
+  --- @class Context
+  local state = {
+    --- @type integer?
+    --- Window ID where trigger the blame command
+    starting_win = vim.api.nvim_get_current_win(),
+    --- @type integer?
+    --- Buffer ID where trigger the blame command
+    starting_buf = vim.api.nvim_get_current_buf(),
+    --- @table
+    --- Window options which would be reset after the blame command is executed
+    starting_win_opts = {
+      --- @type boolean
+      wrap = nil,
+    },
+
+    --- @type integer?
+    --- Window ID for the blame content window
+    blame_win = nil,
+    --- @type integer?
+    --- Buffer ID for the blame content buffer
+    blame_buf = nil,
+
+    --- @type integer?
+    --- Window ID for the commit detail window
+    commit_win = nil,
+    --- @type integer?
+    --- Buffer ID for the commit detail buffer
+    commit_buf = nil,
+
+    --- @type string
+    --- Root path for the current git repository
+    git_root = "",
+    --- @type string
+    --- Relative path of the current buffer
+    relative_path = "",
+    --- @type string
+    --- File name of the current buffer
+    file_name = "",
+
+    --- @table
+    events = {
+      --- @type integer?
+      --- ID for the window enter event
+      win_enter = nil,
+    },
+  }
+
+  for _, win_opt in ipairs { "wrap" } do
+    state.starting_win_opts[win_opt] = vim.api.nvim_get_option_value(win_opt, { win = state.starting_win })
+  end
+
+  setmetatable(state, self)
+
+  self.__index = self
+
+  return state
+end
+
+--- @param lines string[]
+function Context:set_blame_context(lines)
+  local blame_win, blame_buf = create_blame_win()
+
+  self.blame_win = blame_win
+  self.blame_buf = blame_buf
+
+  vim.api.nvim_buf_set_lines(blame_buf, 0, -1, true, lines)
+  vim.api.nvim_win_set_width(blame_win, blame_line_chars() + 1)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = blame_buf })
+  vim.api.nvim_set_option_value("readonly", true, { buf = blame_buf })
+end
+
+--- @param commit_hash string
+---@param lines string[]
+function Context:set_commit_context(commit_hash, lines)
+  local commit_win, commit_buf = create_blame_win()
+
+  self.commit_win = commit_win
+  self.commit_buf = commit_buf
+
+  vim.api.nvim_buf_set_lines(commit_buf, 0, -1, true, lines)
+  vim.api.nvim_buf_set_name(commit_buf, commit_hash)
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = commit_buf })
+  vim.api.nvim_set_option_value("bufhidden", "delete", { buf = commit_buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = commit_buf })
+  vim.api.nvim_set_option_value("readonly", true, { buf = commit_buf })
+
+  vim.api.nvim_win_set_width(commit_win, 80)
+  vim.api.nvim_set_option_value("cursorbind", false, { win = commit_win })
+  vim.api.nvim_set_option_value("scrollbind", false, { win = commit_win })
+end
+
+--- @param git_root string
+function Context:set_git_context(git_root)
+  self.git_root = git_root
+  self.relative_path = vim.fn.fnamemodify(vim.fn.expand "%", ":~:.")
+  self.file_name = vim.fn.fnamemodify(vim.fn.expand "%:t", ":~:.")
+end
+
+function Context:set_win_listener()
+  self.events.win_enter = vim.api.nvim_create_autocmd("WinEnter", {
+    group = vim.api.nvim_create_augroup("BlameWinListener", { clear = true }),
+    callback = function()
+      vim.defer_fn(function()
+        local focused_buf = vim.api.nvim_get_current_buf()
+
+        if focused_buf == self.commit_buf then
+          -- skip
+        elseif focused_buf == self.blame_buf then
+          on_quit(self.commit_win, self.blame_win)
+        else
+          local focused_win = vim.api.nvim_get_current_win()
+
+          self:on_blame_quit(focused_win)
+        end
+      end, 100)
+    end,
+  })
+end
+
+function Context:clear_listeners()
+  for _, event_id in pairs(self.events) do
+    if event_id ~= nil then
+      pcall(vim.api.nvim_del_autocmd, event_id)
+    end
+  end
+end
+
+--- @param next_win integer
+function Context:on_blame_quit(next_win)
+  vim.api.nvim_set_option_value("scrollbind", false, { win = self.starting_win })
+  vim.api.nvim_set_option_value("cursorbind", false, { win = self.starting_win })
+  vim.api.nvim_set_option_value("wrap", self.starting_win_opts.wrap, { win = self.starting_win })
+
+  on_quit(self.commit_win, next_win)
+  on_quit(self.blame_win, next_win)
+
+  self:clear_listeners()
 end
 
 local function blame_syntax()
@@ -78,23 +223,14 @@ local function blame_syntax()
   end
 end
 
-local function on_blame_done(lines)
-  local starting_win = vim.api.nvim_get_current_win()
-  local current_top = vim.fn.line "w0" + vim.api.nvim_get_option "scrolloff"
-  local current_pos = vim.fn.line "."
-
-  -- Save the state
-  blame_state.starting_win = starting_win
-  blame_state.wrap = vim.api.nvim_win_get_option(vim.api.nvim_get_current_win(), "wrap")
-  -- Disable wrap
-  vim.api.nvim_win_set_option(starting_win, "wrap", false)
+--- @param ctx Context
+local function on_blame_done(ctx, lines)
+  ctx:set_win_listener()
 
   local current_top = vim.fn.line "w0" + vim.api.nvim_get_option_value("scrolloff", { win = ctx.starting_win })
   local current_pos = vim.fn.line "."
 
-  vim.api.nvim_buf_set_lines(blame_buf, 0, -1, true, lines)
-  vim.api.nvim_buf_set_option(blame_buf, "modifiable", false)
-  vim.api.nvim_win_set_width(blame_win, blameLinechars() + 1)
+  ctx:set_blame_context(lines)
 
   vim.cmd("execute " .. tostring(current_top))
   vim.cmd "normal! zt"
@@ -114,17 +250,16 @@ local function on_blame_done(lines)
     noremap = true,
     silent = true,
     expr = false,
+    buffer = ctx.blame_buf,
   }
 
-  vim.api.nvim_buf_set_keymap(0, "n", config.keymaps.quit_blame, "<CMD>q<CR>", options)
-  vim.api.nvim_buf_set_keymap(
-    0,
-    "n",
-    config.keymaps.blame_commit,
-    "<CMD>lua require('git.blame').blame_commit()<CR>",
-    options
-  )
-  vim.api.nvim_command "autocmd BufWinLeave <buffer> lua require('git.blame').blame_quit()"
+  vim.keymap.set("n", config.keymaps.quit_blame, function()
+    ctx:on_blame_quit(ctx.starting_win)
+  end, options)
+
+  vim.keymap.set("n", config.keymaps.blame_commit, function()
+    M.blame_commit(ctx)
+  end, options)
 
   blame_syntax()
 end
@@ -166,7 +301,8 @@ function M.blame_commit_quit()
   vim.fn.delete(blame_state.temp_file)
 end
 
-function M.blame_commit()
+--- @param ctx Context
+function M.blame_commit(ctx)
   local line = vim.fn.getline "."
   local commit = vim.fn.matchstr(line, [[^\^\=[?*]*\zs\x\+]])
   if string.match(commit, "^0+$") then
@@ -175,7 +311,7 @@ function M.blame_commit()
   end
 
   local commit_hash =
-    git.run_git_cmd("git -C " .. blame_state.git_root .. " --literal-pathspecs rev-parse --verify " .. commit .. " --")
+    git.run_git_cmd("git -C " .. ctx.git_root .. " --literal-pathspecs rev-parse --verify " .. commit .. " --")
   if commit_hash == nil then
     utils.log "Commit hash not found"
     return
@@ -183,9 +319,11 @@ function M.blame_commit()
 
   commit_hash = string.gsub(commit_hash, "\n", "")
   local diff_cmd = "git -C "
-    .. blame_state.git_root
+    .. ctx.git_root
     .. " --literal-pathspecs --no-pager show --no-color "
     .. commit_hash
+    .. " -- "
+    .. vim.api.nvim_buf_get_name(ctx.starting_buf)
 
   local lines = {}
   local function on_event(_, data, event)
@@ -217,13 +355,9 @@ function M.blame_commit()
   })
 end
 
-function M.blame_quit()
-  vim.api.nvim_win_set_option(blame_state.starting_win, "scrollbind", false)
-  vim.api.nvim_win_set_option(blame_state.starting_win, "cursorbind", false)
-  vim.api.nvim_win_set_option(blame_state.starting_win, "wrap", blame_state.wrap)
-end
-
 function M.blame()
+  local ctx = Context:new()
+
   local fpath = utils.escape_parentheses(vim.api.nvim_buf_get_name(0))
   if fpath == "" or fpath == nil then
     return
@@ -234,9 +368,7 @@ function M.blame()
     return
   end
 
-  blame_state.git_root = git_root
-  blame_state.relative_path = vim.fn.fnamemodify(vim.fn.expand "%", ":~:.")
-  blame_state.file_name = vim.fn.fnamemodify(vim.fn.expand "%:t", ":~:.")
+  ctx:set_git_context(git_root)
 
   local blame_cmd = "git -C "
     .. git_root
@@ -275,7 +407,7 @@ function M.blame()
       utils.log("Failed to open git blame window: " .. error_message)
     elseif event == "exit" then
       if not has_error then
-        on_blame_done(lines)
+        on_blame_done(ctx, lines)
       end
     end
   end
