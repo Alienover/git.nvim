@@ -264,7 +264,10 @@ local function on_blame_done(ctx, lines)
   blame_syntax()
 end
 
-local function on_blame_commit_done(commit_hash, lines)
+--- @param ctx Context
+--- @param commit_hash string
+--- @param lines string[]
+local function on_blame_commit_done(ctx, commit_hash, lines)
   -- TODO: Find a better way to handle this case
   local idx = 1
   while idx <= #lines and not utils.starts_with(lines[idx], "diff") do
@@ -272,33 +275,15 @@ local function on_blame_commit_done(commit_hash, lines)
   end
   table.insert(lines, idx, "")
 
-  local temp_file = vim.fn.tempname()
-  blame_state.temp_file = temp_file
-  vim.fn.writefile(lines, temp_file)
+  ctx:set_commit_context(commit_hash, lines)
 
-  -- Close blame window
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_close(win, true)
+  vim.keymap.set("n", config.keymaps.quit_blame, function()
+    on_quit(ctx.commit_win, ctx.blame_win)
+  end, { noremap = true, silent = true, buffer = ctx.commit_buf })
 
-  vim.api.nvim_command("silent! e" .. temp_file)
-
-  local buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_name(buf, commit_hash)
-  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(buf, "bufhidden", "delete")
-  vim.api.nvim_command "autocmd BufLeave <buffer> lua require('git.blame').blame_commit_quit()"
-
-  if vim.fn.search([[^diff .* b/\M]] .. vim.fn.escape(blame_state.relative_path, "\\") .. "$", "W") == 0 then
-    vim.fn.search([[^diff .* b/.*]] .. blame_state.file_name .. "$", "W")
+  if vim.fn.search([[^diff .* b/\M]] .. vim.fn.escape(ctx.relative_path, "\\") .. "$", "W") == 0 then
+    vim.fn.search([[^diff .* b/.*]] .. ctx.file_name .. "$", "W")
   end
-
-  vim.cmd "normal! zt"
-end
-
-function M.blame_commit_quit()
-  local buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_command(buf .. "bdelete")
-  vim.fn.delete(blame_state.temp_file)
 end
 
 --- @param ctx Context
@@ -342,7 +327,7 @@ function M.blame_commit(ctx)
     end
 
     if event == "exit" then
-      on_blame_commit_done(commit_hash, lines)
+      on_blame_commit_done(ctx, commit_hash, lines)
     end
   end
 
