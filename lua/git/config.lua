@@ -21,7 +21,15 @@ local default_cfg = {
   },
   target_branch = "master",
   private_gitlabs = {},
-  winbar = false
+  winbar = false,
+  functions = {
+    git = true, -- :Git, run git command
+    blame = true, -- :GitBlame, blame the current file
+    browse = true, -- :GitBrowse, view the current file on browser
+    pull_request = true, -- create/view pull_request
+    diff = true, -- :GitDiff, toggle diff view
+    revert = true, -- :GitRevert
+  },
 }
 
 function M.is_private_gitlab(host)

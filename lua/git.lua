@@ -1,76 +1,135 @@
 local M = {}
 
-local function config_keymap(mode, lhs, rhs, options)
-  if lhs == nil or lhs == "" then
-    return
+---@class Setting
+---@field key string
+---@field mode? string | table
+---@field rhs function|string
+---@field cmd? string
+---@field cmd_opts? vim.api.keyset.user_command
+
+--- @type table< string, Setting[] >
+local settings = {
+  blame = {
+    {
+      key = "blame",
+      rhs = function()
+        require("git.blame").open()
+      end,
+      cmd = "GitBlame",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+  },
+  browse = {
+    {
+      key = "browse",
+      mode = "n",
+      rhs = function(args)
+        require("git.browse").open(args.args == "range")
+      end,
+      cmd = "GitBrowse",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+    {
+      key = "browse",
+      mode = "x",
+      rhs = ":<c-u> GitBrowse range<CR>",
+    },
+  },
+  pull_request = {
+    {
+      key = "open_pull_request",
+      rhs = function()
+        require("git.browse").pull_request()
+      end,
+    },
+    {
+      key = "create_pull_request",
+      rhs = function(args)
+        require("git.browse").create_pull_request(args.fargs)
+      end,
+      cmd = "GitCreatePullRequest",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+  },
+  diff = {
+    {
+      key = "diff",
+      rhs = function(args)
+        require("git.diff").open(args.args)
+      end,
+      cmd = "GitDiff",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+    {
+      key = "diff_close",
+      rhs = function()
+        require("git.diff").close()
+      end,
+      cmd = "GitDiffClose",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+  },
+  revert = {
+    {
+      key = "revert",
+      rhs = function()
+        require("git.revert").open(false)
+      end,
+      cmd = "GitRevert",
+      cmd_opts = { bang = true },
+    },
+    {
+      key = "revert_file",
+      rhs = function()
+        require("git.revert").open(true)
+      end,
+      cmd = "GitRevertFile",
+      cmd_opts = { bang = true },
+    },
+  },
+  git = {
+    {
+      key = "git",
+      rhs = function(args)
+        require("git.cmd").cmd(unpack(args.fargs))
+      end,
+      cmd = "Git",
+      cmd_opts = { bang = true, nargs = "*" },
+    },
+  },
+}
+
+local function initialize()
+  local config = require("git.config").config
+
+  for key, setting in pairs(settings) do
+    local enabled = config.functions[key]
+
+    if enabled == true then
+      for _, feature in ipairs(setting) do
+        local cmd, cmd_opts, rhs = feature.cmd, feature.cmd_opts, feature.rhs
+        if cmd ~= nil then
+          vim.api.nvim_create_user_command(cmd, rhs, cmd_opts or {})
+        end
+
+        local mapping = config.keymaps[feature.key]
+        local mode = feature.mode or "n"
+        if mapping ~= nil then
+          vim.keymap.set(mode, mapping, cmd and string.format(":%s<CR>", cmd) or rhs, {
+            noremap = true,
+            silent = true,
+            expr = false,
+          })
+        end
+      end
+    end
   end
-
-  vim.api.nvim_set_keymap(mode, lhs, rhs, options)
-end
-
-local function config_keymaps()
-  local cfg = require("git.config").config
-
-  local options = {
-    noremap = true,
-    silent = true,
-    expr = false,
-  }
-  config_keymap("n", cfg.keymaps.blame, "<CMD>lua require('git.blame').blame()<CR>", options)
-  config_keymap("n", cfg.keymaps.browse, "<CMD>lua require('git.browse').open(false)<CR>", options)
-  config_keymap("x", cfg.keymaps.browse, ":<C-u> lua require('git.browse').open(true)<CR>", options)
-  config_keymap("n", cfg.keymaps.open_pull_request, "<CMD>lua require('git.browse').pull_request()<CR>", options)
-  config_keymap(
-    "n",
-    cfg.keymaps.create_pull_request,
-    "<CMD>lua require('git.browse').create_pull_request()<CR>",
-    options
-  )
-  config_keymap("n", cfg.keymaps.diff, "<CMD>lua require('git.diff').open()<CR>", options)
-  config_keymap("n", cfg.keymaps.diff_close, "<CMD>lua require('git.diff').close()<CR>", options)
-  config_keymap("n", cfg.keymaps.revert, "<CMD>lua require('git.revert').open(false)<CR>", options)
-  config_keymap("n", cfg.keymaps.revert_file, "<CMD>lua require('git.revert').open(true)<CR>", options)
-end
-
-local function config_commands()
-  vim.api.nvim_create_user_command("GitBlame", 'lua require("git.blame").blame()<CR>', {
-    bang = true,
-    nargs = "*",
-  })
-
-  vim.api.nvim_create_user_command("GitCreatePullRequest", 'lua require("git.browse").create_pull_request(<f-args>)', {
-    bang = true,
-    nargs = "*",
-  })
-
-  vim.api.nvim_create_user_command("GitDiff", 'lua require("git.diff").open(<f-args>)', {
-    bang = true,
-    nargs = "*",
-  })
-
-  vim.api.nvim_create_user_command("GitDiffClose", 'lua require("git.diff").close()', {
-    bang = true,
-  })
-
-  vim.api.nvim_create_user_command("Git", 'lua require("git.cmd").cmd(<f-args>)', {
-    bang = true,
-    nargs = "*",
-  })
-
-  vim.api.nvim_create_user_command("GitRevert", 'lua require("git.revert").open(false)', {
-    bang = true,
-  })
-
-  vim.api.nvim_create_user_command("GitRevertFile", 'lua require("git.revert").open(true)', {
-    bang = true,
-  })
 end
 
 function M.setup(cfg)
   require("git.config").setup(cfg)
 
-  config_keymaps()
-  config_commands()
+  initialize()
 end
 
 return M
