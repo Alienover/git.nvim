@@ -10,18 +10,18 @@ local function create_cmd_win()
   win = vim.api.nvim_get_current_win()
   buf = vim.api.nvim_get_current_buf()
 
-  vim.api.nvim_buf_set_option(buf, "buftype", "")
-  vim.api.nvim_buf_set_option(buf, "bufhidden", "hide")
-  vim.api.nvim_buf_set_option(buf, "swapfile", false)
-  vim.api.nvim_buf_set_option(buf, "buflisted", false)
-  vim.api.nvim_buf_set_option(buf, "modifiable", false)
+  vim.api.nvim_set_option_value("buftype", "", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+  vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   if config.winbar then
-    vim.api.nvim_buf_set_option_value("winbar", "Git CMD", { scope = 'local', win = win })
+    vim.api.nvim_set_option_value("winbar", "Git CMD", { scope = "local", win = win })
   end
 
-  vim.api.nvim_win_set_option(win, "wrap", false)
-  vim.api.nvim_win_set_option(win, "number", false)
-  vim.api.nvim_win_set_option(win, "list", false)
+  vim.api.nvim_set_option_value("wrap", false, { win = win })
+  vim.api.nvim_set_option_value("number", false, { win = win })
+  vim.api.nvim_set_option_value("list", false, { win = win })
 
   -- Keymaps
   local options = {
